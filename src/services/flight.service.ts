@@ -4,15 +4,16 @@ import { Observable, catchError, of, map, throwError } from 'rxjs';
 
 export interface Flight {
   id: string;
-  ville_depart: string;
-  ville_arrivee: string;
-  date_depart: string;
-  date_arrivee: string;
+  ville_depart?: string;
+  ville_arrivee?: string;
+  date_depart?: string;
+  date_arrivee?: string;
   prix: number;
   temps_trajet: number; // Backend returns minutes as number
-  places_disponibles: number;
-  places_reservees: number;
-  capacite_maximale: number;
+  places_disponibles?: number;
+  places_reservees?: number;
+  capacite_maximale?: number;
+  placesDisponibles?: number; // Backend uses this field name
   created_at?: string;
   updated_at?: string;
   // Frontend display properties
@@ -28,7 +29,7 @@ export interface Flight {
 
 export interface FlightSearchParams {
   date_depart?: string;
-  date_arrivee?: string;
+  date_retour?: string;
   ville_depart?: string;
   ville_arrivee?: string;
   tri?: 'prix' | 'temps_trajet';
@@ -79,27 +80,37 @@ export class FlightService {
     if (params.date_depart) {
       httpParams = httpParams.set('date_depart', params.date_depart);
     }
-    if (params.date_arrivee) {
-      httpParams = httpParams.set('date_arrivee', params.date_arrivee);
+    if (params.date_retour) {
+      httpParams = httpParams.set('date_arrivee', params.date_retour);
     }
     if (params.ville_depart) {
-      httpParams = httpParams.set('ville_depart', params.ville_depart);
+      httpParams = httpParams.set('villeDepart', params.ville_depart);
     }
     if (params.ville_arrivee) {
-      httpParams = httpParams.set('ville_arrivee', params.ville_arrivee);
+      httpParams = httpParams.set('villeArrivee', params.ville_arrivee);
     }
     if (params.tri) {
       httpParams = httpParams.set('tri', params.tri);
     }
 
-    return this.http.get<Flight[]>(`${this.baseUrl}/vols`, { params: httpParams })
+    console.log('Making API call with params:', httpParams.toString());
+    
+    return this.http.get<Flight | Flight[]>(`${this.baseUrl}/vols`, { params: httpParams })
       .pipe(
-        map(flights => ({
-          flights: this.enrichFlightData(flights),
-          total: flights.length
-        })),
+        map(response => {
+          console.log('API Response:', response);
+          // Handle both single flight and array responses
+          const flights = Array.isArray(response) ? response : [response];
+          const enrichedFlights = this.enrichFlightData(flights);
+          console.log('Enriched flights:', enrichedFlights);
+          return {
+            flights: enrichedFlights,
+            total: enrichedFlights.length
+          };
+        }),
         catchError(error => {
           console.error('Error fetching flights:', error);
+          console.error('Error details:', error.error);
           return throwError(() => error);
         })
       );
@@ -128,10 +139,12 @@ export class FlightService {
   private enrichFlightData(flights: Flight[]): Flight[] {
     return flights.map(flight => ({
       ...flight,
+      // Normalize field names
+      places_disponibles: flight.places_disponibles || flight.placesDisponibles || 0,
       compagnie: this.getRandomAirline(),
-      heure_depart: this.extractTimeFromDateTime(flight.date_depart),
-      heure_arrivee: this.extractTimeFromDateTime(flight.date_arrivee),
-      temps_trajet_formatted: this.formatDuration(flight.temps_trajet),
+      heure_depart: this.extractTimeFromDateTime(flight.date_depart || ''),
+      heure_arrivee: this.extractTimeFromDateTime(flight.date_arrivee || ''),
+      temps_trajet_formatted: this.formatDuration(flight.temps_trajet || 0),
       offres: Math.floor(Math.random() * 20 + 5).toString(),
       escales: Math.floor(Math.random() * 3),
       bagages: Math.random() > 0.5,
@@ -145,8 +158,10 @@ export class FlightService {
   }
 
   private extractTimeFromDateTime(dateTimeStr: string): string {
+    if (!dateTimeStr) return '00:00';
     try {
       const date = new Date(dateTimeStr);
+      if (isNaN(date.getTime())) return '00:00';
       return date.toLocaleTimeString('fr-FR', { 
         hour: '2-digit', 
         minute: '2-digit',
@@ -158,6 +173,7 @@ export class FlightService {
   }
 
   private formatDuration(minutes: number): string {
+    if (!minutes || minutes === 0) return '0:00';
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}:${mins.toString().padStart(2, '0')}`;
